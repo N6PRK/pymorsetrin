@@ -15,22 +15,57 @@
 import board
 import digitalio
 import keypad
+import neopixel_write
 import usb_hid
 
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 
 
-for pin in (board.RING_2, board.SLEEVE):
-    digitalio.DigitalInOut(pin).switch_to_output(False)
+class Emitter:
+    """Emits keycodes and controls the neopixel."""
 
-keys = keypad.Keys((board.TIP, board.RING_1), value_when_pressed=False)
-keycode_map = [Keycode.LEFT_CONTROL, Keycode.RIGHT_CONTROL]
-actuation_map = {True: Keyboard.press, False: Keyboard.release}
+    def __init__(self):
+        self.kbd = Keyboard(usb_hid.devices)
+        self.keycodes = [Keycode.LEFT_CONTROL, Keycode.RIGHT_CONTROL]
 
-kbd = Keyboard(usb_hid.devices)
-while True:
-    event = keys.events.get()
-    if event:
-        keycode = keycode_map[event.key_number]
-        actuation_map[event.pressed](kbd, keycode)
+        self.pixel = digitalio.DigitalInOut(board.NEOPIXEL)
+        self.pixel.direction = digitalio.Direction.OUTPUT
+        self.pixel_state = 0
+        self.pixel_colors = [
+            bytearray([0, 0, 0]),
+            bytearray([0xFF, 0, 0]),
+            bytearray([0, 0, 0xFF]),
+            bytearray([0, 0xFF, 0]),
+        ]
+
+        self.actions = {True: self._pressed, False: self._released}
+
+    def emit(self, key_number, pressed):
+        """Emits the keycode for the given key and controls the neopixel."""
+        self.actions[pressed](key_number)
+        neopixel_write.neopixel_write(self.pixel, self.pixel_colors[self.pixel_state])
+
+    def _pressed(self, key_number):
+        keycode = self.keycodes[key_number]
+        self.kbd.press(keycode)
+        self.pixel_state += key_number + 1
+
+    def _released(self, key_number):
+        keycode = self.keycodes[key_number]
+        self.kbd.release(keycode)
+        self.pixel_state -= key_number + 1
+
+
+def main():
+    for pin in (board.RING_2, board.SLEEVE):
+        digitalio.DigitalInOut(pin).switch_to_output(False)
+    keys = keypad.Keys((board.TIP, board.RING_1), value_when_pressed=False)
+    emitter = Emitter()
+    while True:
+        event = keys.events.get()
+        if event:
+            emitter.emit(event.key_number, event.pressed)
+
+
+main()
